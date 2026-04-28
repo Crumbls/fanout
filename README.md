@@ -1,5 +1,9 @@
 # crumbls/fanout
 
+[![tests](https://github.com/Crumbls/fanout/actions/workflows/tests.yml/badge.svg)](https://github.com/Crumbls/fanout/actions/workflows/tests.yml)
+[![Latest Version](https://img.shields.io/github/v/release/Crumbls/fanout?include_prereleases)](https://github.com/Crumbls/fanout/releases)
+[![License](https://img.shields.io/github/license/Crumbls/fanout)](LICENSE)
+
 Catch incoming webhooks and fan them out to multiple downstream destinations — staging, dev, secondary services — with retries, signing, transformation, filtering, rate limiting, and replay.
 
 Solves the "production webhooks never reach staging/dev" problem and the broader "I need to mirror webhooks across environments without writing a custom forwarder per source" problem.
