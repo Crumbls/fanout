@@ -1,0 +1,59 @@
+{
+    "name": "crumbls/fanout",
+    "description": "Catch incoming webhooks and fan them out to multiple downstream destinations with retries, signing, transformation, filtering, and replay.",
+    "keywords": [
+        "Crumbls",
+        "Laravel",
+        "Webhooks",
+        "Fanout",
+        "Forwarder"
+    ],
+    "homepage": "https://github.com/Crumbls/fanout",
+    "license": "MIT",
+    "type": "library",
+    "authors": [
+        {
+            "name": "Chase C. Miller",
+            "email": "chase@crumbls.com",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^12.0 || ^13.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^9.0 || ^10.0",
+        "pestphp/pest": "^3.0",
+        "pestphp/pest-plugin-laravel": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Crumbls\\Fanout\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Crumbls\\Fanout\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Crumbls\\Fanout\\FanoutServiceProvider"
+            ],
+            "aliases": {
+                "Fanout": "Crumbls\\Fanout\\Facades\\Fanout"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
