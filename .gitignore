@@ -1,5 +1,10 @@
 /vendor/
 /node_modules/
+/build/
+composer.lock
 .phpunit.result.cache
+.phpunit.cache
+.idea
+.vscode
 .DS_Store
 *.swp

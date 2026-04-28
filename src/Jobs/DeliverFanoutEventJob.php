@@ -114,7 +114,11 @@ class DeliverFanoutEventJob implements ShouldQueue
         $payload = $this->applyTransform($endpoint, $payload, $event);
 
         if ($this->throttled($endpoint)) {
-            $this->reschedule($delivery, $endpoint, RateLimiter::availableIn($endpoint->rateLimiterKey()), countAttempt: false);
+            $this->reschedule(
+                delivery: $delivery,
+                endpoint: $endpoint,
+                delaySeconds: max(1, RateLimiter::availableIn($endpoint->rateLimiterKey())),
+            );
 
             return;
         }
@@ -348,8 +352,10 @@ class DeliverFanoutEventJob implements ShouldQueue
         ?int $statusCode = null,
         ?string $body = null,
         ?string $error = null,
-        bool $countAttempt = true,
     ): void {
+        // Reschedule never increments attempts — increments happen once,
+        // immediately before the HTTP send. Throttling skips the send entirely
+        // and exits before the increment runs.
         $update = [
             'status'          => FanoutDelivery::STATUS_PENDING,
             'next_attempt_at' => now()->addSeconds($delaySeconds),
@@ -365,11 +371,6 @@ class DeliverFanoutEventJob implements ShouldQueue
 
         if ($error !== null) {
             $update['last_error'] = $error;
-        }
-
-        if (! $countAttempt) {
-            // throttled — undo the attempt increment we did before the HTTP send
-            $update['attempts'] = max(0, (int) $delivery->attempts - 1);
         }
 
         $delivery->forceFill($update)->save();
