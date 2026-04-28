@@ -1,0 +1,266 @@
+{
+  "info": {
+    "name": "crumbls/fanout — smoke tests",
+    "_postman_id": "fanout-smoke-tests-001",
+    "description": "End-to-end smoke tests for the crumbls/fanout package against a deployed Laravel app + webhook.site as the destination. Run with Newman or the Postman Collection Runner.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",       "value": "https://crumbls.test",                                "type": "string" },
+    { "key": "webhook_token",  "value": "0dd86b32-0d93-4387-bb95-eb34a028fa7c",                "type": "string" },
+    { "key": "fanout_secret",  "value": "smoke-test-secret-change-me",                        "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Health — receiver responds at all",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('404 for unknown profile (route is mounted)', function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body":   { "mode": "raw", "raw": "{\"ping\":true}" },
+        "url":    { "raw": "{{base_url}}/fanout/in/no-such-profile-xyz", "host": ["{{base_url}}"], "path": ["fanout","in","no-such-profile-xyz"] }
+      }
+    },
+    {
+      "name": "2. Smoke — unsigned profile accepts and queues",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const stamp = new Date().toISOString();",
+              "pm.collectionVariables.set('run_id', 'postman-' + Math.random().toString(36).slice(2, 10));",
+              "pm.collectionVariables.set('run_stamp', stamp);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 202', () => pm.response.to.have.status(202));",
+              "const json = pm.response.json();",
+              "pm.test('event_id is a uuid-ish string', () => pm.expect(json.event_id).to.match(/^[0-9a-f-]{36}$/));",
+              "pm.test('persist mode is full', () => pm.expect(json.persist).to.eql('full'));",
+              "pm.collectionVariables.set('last_event_id', json.event_id);",
+              "console.log('Captured event_id:', json.event_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type",     "value": "application/json" },
+          { "key": "X-Postman-Run-Id", "value": "{{run_id}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"smoke.test.unsigned\",\n  \"run_id\": \"{{run_id}}\",\n  \"ts\": \"{{run_stamp}}\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/fanout/in/smoke-test", "host": ["{{base_url}}"], "path": ["fanout","in","smoke-test"] }
+      }
+    },
+    {
+      "name": "3. Smoke — destination received the request",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Give webhook.site a moment in case the queue isn't sync.",
+              "setTimeout(() => {}, 1500);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('webhook.site API responded', () => pm.response.to.have.status(200));",
+              "const captures = pm.response.json().data || [];",
+              "const expected = pm.collectionVariables.get('last_event_id');",
+              "const matched  = captures.find(function (r) {",
+              "    const h = r.headers || {};",
+              "    const v = (h['x-fanout-event'] || h['X-Fanout-Event'] || [])[0];",
+              "    return v === expected;",
+              "});",
+              "pm.test('Destination received our event id (' + expected + ')', () => pm.expect(matched, 'matching capture').to.exist);",
+              "if (matched) {",
+              "    const h = matched.headers || {};",
+              "    pm.test('X-Fanout-Source header forwarded', () => {",
+              "        const v = (h['x-fanout-source'] || h['X-Fanout-Source'] || [])[0];",
+              "        pm.expect(v).to.eql('crumbls-dev');",
+              "    });",
+              "    pm.test('X-Fanout-Profile templated correctly', () => {",
+              "        const v = (h['x-fanout-profile'] || h['X-Fanout-Profile'] || [])[0];",
+              "        pm.expect(v).to.eql('smoke-test');",
+              "    });",
+              "    pm.test('Body round-trip preserves run_id', () => {",
+              "        const body = JSON.parse(matched.content || '{}');",
+              "        pm.expect(body.run_id).to.eql(pm.collectionVariables.get('run_id'));",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "https://webhook.site/token/{{webhook_token}}/requests?sorting=newest&per_page=20",
+          "protocol": "https",
+          "host": ["webhook","site"],
+          "path": ["token","{{webhook_token}}","requests"],
+          "query": [
+            { "key": "sorting",  "value": "newest" },
+            { "key": "per_page", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Signed — valid HMAC accepted",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const cryptoJs = require('crypto-js');",
+              "const stamp    = new Date().toISOString();",
+              "const runId    = 'postman-signed-' + Math.random().toString(36).slice(2, 10);",
+              "const reqBody  = JSON.stringify({ type: 'smoke.test.signed', run_id: runId, ts: stamp });",
+              "const secret   = pm.collectionVariables.get('fanout_secret');",
+              "const hmac     = cryptoJs.HmacSHA256(reqBody, secret).toString(cryptoJs.enc.Hex);",
+              "pm.collectionVariables.set('signed_body', reqBody);",
+              "pm.collectionVariables.set('signed_hmac', hmac);",
+              "pm.collectionVariables.set('signed_run_id', runId);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 202 (signature valid)', () => pm.response.to.have.status(202));",
+              "const json = pm.response.json();",
+              "pm.collectionVariables.set('signed_event_id', json.event_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Signature",  "value": "{{signed_hmac}}" }
+        ],
+        "body": { "mode": "raw", "raw": "{{signed_body}}" },
+        "url":  { "raw": "{{base_url}}/fanout/in/smoke-test-signed", "host": ["{{base_url}}"], "path": ["fanout","in","smoke-test-signed"] }
+      }
+    },
+    {
+      "name": "5. Signed — bad signature rejected",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 401 (signature rejected)', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-Signature",  "value": "deadbeef" }
+        ],
+        "body": { "mode": "raw", "raw": "{\"type\":\"smoke.test.signed.bad\"}" },
+        "url":  { "raw": "{{base_url}}/fanout/in/smoke-test-signed", "host": ["{{base_url}}"], "path": ["fanout","in","smoke-test-signed"] }
+      }
+    },
+    {
+      "name": "6. Signed — outbound carries fanout-side HMAC header",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "setTimeout(() => {}, 1500);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const cryptoJs = require('crypto-js');",
+              "pm.test('webhook.site API responded', () => pm.response.to.have.status(200));",
+              "const captures = pm.response.json().data || [];",
+              "const expected = pm.collectionVariables.get('signed_event_id');",
+              "const matched  = captures.find(function (r) {",
+              "    const h = r.headers || {};",
+              "    const v = (h['x-fanout-event'] || h['X-Fanout-Event'] || [])[0];",
+              "    return v === expected;",
+              "});",
+              "pm.test('Destination received the signed event', () => pm.expect(matched, 'matching capture').to.exist);",
+              "if (matched) {",
+              "    const h = matched.headers || {};",
+              "    pm.test('Outbound has X-Fanout-Signature: sha256=...', () => {",
+              "        const sig = (h['x-fanout-signature'] || h['X-Fanout-Signature'] || [])[0];",
+              "        pm.expect(sig).to.be.a('string');",
+              "        pm.expect(sig.startsWith('sha256=')).to.be.true;",
+              "    });",
+              "    pm.test('Outbound HMAC verifies against the same secret', () => {",
+              "        const sig      = (h['x-fanout-signature'] || h['X-Fanout-Signature'] || [])[0];",
+              "        const hex      = sig.replace(/^sha256=/, '');",
+              "        const secret   = pm.collectionVariables.get('fanout_secret');",
+              "        const expected = cryptoJs.HmacSHA256(matched.content, secret).toString(cryptoJs.enc.Hex);",
+              "        pm.expect(hex).to.eql(expected);",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "url": {
+          "raw": "https://webhook.site/token/{{webhook_token}}/requests?sorting=newest&per_page=20",
+          "protocol": "https",
+          "host": ["webhook","site"],
+          "path": ["token","{{webhook_token}}","requests"],
+          "query": [
+            { "key": "sorting",  "value": "newest" },
+            { "key": "per_page", "value": "20" }
+          ]
+        }
+      }
+    }
+  ]
+}
