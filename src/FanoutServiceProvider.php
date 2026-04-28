@@ -27,6 +27,7 @@ class FanoutServiceProvider extends ServiceProvider
         $this->registerMigrations();
         $this->registerRoutes();
         $this->registerCommands();
+        $this->registerTestingSink();
     }
 
     protected function registerPublishes(): void
@@ -78,5 +79,21 @@ class FanoutServiceProvider extends ServiceProvider
             ReplayFailedCommand::class,
             PurgeOldEventsCommand::class,
         ]);
+    }
+
+    protected function registerTestingSink(): void
+    {
+        if (! (bool) config('fanout.testing.sink_enabled', false)) {
+            return;
+        }
+
+        $config = config('fanout.testing', []);
+
+        Route::group([
+            'prefix'     => $config['sink_prefix']     ?? 'fanout/_sink',
+            'middleware' => $config['sink_middleware'] ?? ['api'],
+        ], function (): void {
+            $this->loadRoutesFrom(__DIR__ . '/../routes/fanout-testing.php');
+        });
     }
 }

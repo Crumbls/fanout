@@ -37,6 +37,31 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | In-package webhook test sink
+    |--------------------------------------------------------------------------
+    |
+    | An optional self-hosted webhook catcher useful for end-to-end smoke
+    | tests against your own deployment. Captures land in the
+    | `fanout_test_captures` table for later inspection / assertion.
+    |
+    | NEVER enable this in production. Captures are stored unencrypted by
+    | design (debug data) and the routes have no authentication. The flag
+    | defaults off precisely because of that.
+    |
+    | Routes when enabled:
+    |   POST   {sink_prefix}/{name}             — capture a request
+    |   GET    {sink_prefix}/{name}/captures    — list recent captures
+    |   DELETE {sink_prefix}/{name}             — clear captures for that sink
+    |
+    */
+    'testing' => [
+        'sink_enabled'    => env('FANOUT_TEST_SINK_ENABLED', false),
+        'sink_prefix'     => env('FANOUT_TEST_SINK_PREFIX', 'fanout/_sink'),
+        'sink_middleware' => ['api'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Pruning policy
     |--------------------------------------------------------------------------
     */

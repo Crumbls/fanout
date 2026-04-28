@@ -1,0 +1,181 @@
+{
+  "info": {
+    "name": "crumbls/fanout — sink (Pattern B) tests",
+    "_postman_id": "fanout-sink-tests-001",
+    "description": "End-to-end smoke tests using the in-package webhook sink instead of webhook.site. No third-party dependency, fully deterministic.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://crumbls.test", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Reset sinks (staging + dev)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('staging sink cleared', () => pm.response.to.have.status(200));",
+              "pm.sendRequest({",
+              "    url: pm.collectionVariables.get('base_url') + '/fanout/_sink/dev',",
+              "    method: 'DELETE',",
+              "}, (err, res) => {",
+              "    pm.test('dev sink cleared', () => pm.expect(res && res.code).to.eql(200));",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "url": { "raw": "{{base_url}}/fanout/_sink/staging", "host": ["{{base_url}}"], "path": ["fanout","_sink","staging"] }
+      }
+    },
+    {
+      "name": "2. Fire one inbound through the smoke-sink profile",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('run_id', 'sink-' + Math.random().toString(36).slice(2, 10));",
+              "pm.collectionVariables.set('run_stamp', new Date().toISOString());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 202', () => pm.response.to.have.status(202));",
+              "const json = pm.response.json();",
+              "pm.test('event_id is uuid-ish', () => pm.expect(json.event_id).to.match(/^[0-9a-f-]{36}$/));",
+              "pm.collectionVariables.set('last_event_id', json.event_id);",
+              "console.log('Captured event_id:', json.event_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"type\": \"sink.smoke\",\n  \"run_id\": \"{{run_id}}\",\n  \"ts\": \"{{run_stamp}}\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/fanout/in/smoke-sink", "host": ["{{base_url}}"], "path": ["fanout","in","smoke-sink"] }
+      }
+    },
+    {
+      "name": "3. Staging sink received the request",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "const captures = pm.response.json().data || [];",
+              "const expected = pm.collectionVariables.get('last_event_id');",
+              "const matched  = captures.find(function (c) {",
+              "    const v = (c.headers['x-fanout-event'] || [])[0];",
+              "    return v === expected;",
+              "});",
+              "pm.test('Staging captured the event ' + expected, () => pm.expect(matched).to.exist);",
+              "if (matched) {",
+              "    pm.test('Headers templated correctly', () => {",
+              "        pm.expect((matched.headers['x-fanout-source']  || [])[0]).to.eql('crumbls-dev');",
+              "        pm.expect((matched.headers['x-fanout-profile'] || [])[0]).to.eql('smoke-sink');",
+              "    });",
+              "    pm.test('Body round-trip preserves run_id', () => {",
+              "        const body = JSON.parse(matched.payload || '{}');",
+              "        pm.expect(body.run_id).to.eql(pm.collectionVariables.get('run_id'));",
+              "    });",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/fanout/_sink/staging/captures", "host": ["{{base_url}}"], "path": ["fanout","_sink","staging","captures"] }
+      }
+    },
+    {
+      "name": "4. Dev sink received the same fan-out",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "const captures = pm.response.json().data || [];",
+              "const expected = pm.collectionVariables.get('last_event_id');",
+              "const matched  = captures.find(function (c) {",
+              "    const v = (c.headers['x-fanout-event'] || [])[0];",
+              "    return v === expected;",
+              "});",
+              "pm.test('Dev captured the same event id', () => pm.expect(matched).to.exist);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/fanout/_sink/dev/captures", "host": ["{{base_url}}"], "path": ["fanout","_sink","dev","captures"] }
+      }
+    },
+    {
+      "name": "5. Reset, send 3 events, verify count",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.sendRequest({",
+              "    url: pm.collectionVariables.get('base_url') + '/fanout/_sink/staging',",
+              "    method: 'DELETE',",
+              "}, (err, res) => {",
+              "    if (err) { console.error('clear failed', err); return; }",
+              "    let i = 0;",
+              "    const fire = () => {",
+              "        if (i >= 3) return;",
+              "        i++;",
+              "        pm.sendRequest({",
+              "            url: pm.collectionVariables.get('base_url') + '/fanout/in/smoke-sink',",
+              "            method: 'POST',",
+              "            header: { 'Content-Type': 'application/json' },",
+              "            body: { mode: 'raw', raw: JSON.stringify({ type: 'sink.batch', n: i }) },",
+              "        }, fire);",
+              "    };",
+              "    fire();",
+              "});"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Staging captured exactly 3 events', () => {",
+              "    pm.expect(pm.response.json().count).to.eql(3);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/fanout/_sink/staging/captures", "host": ["{{base_url}}"], "path": ["fanout","_sink","staging","captures"] }
+      }
+    }
+  ]
+}
